@@ -56,7 +56,7 @@ struct process run_program(const char *argv[])
 	ret.pid = fork();
 	if (ret.pid == 0) {
 		close(pipefd[0]);
-		if (dup2(pipefd[1], STDOUT_FILENO)) {
+		if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
 			perror("dup2");
 			exit(1);
 		}
