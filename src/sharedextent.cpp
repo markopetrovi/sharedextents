@@ -19,52 +19,6 @@
 #include <unordered_set>
 #include <string>
 
-#define bool unsigned char
-#define true 1
-#define false 0
-
-void find_device(char *buf, int len, dev_t id)
-{
-	DIR *devdir = opendir("/dev");
-	if (!devdir) {
-		perror("opendir(\"/dev\")");
-		exit(1);
-	}
-	int fd = dirfd(devdir);
-	if (fd < 0) {
-		perror("dirfd");
-		exit(1);
-	}
-
-	struct dirent *d;
-	struct stat info;
-	bool found = false;
-	while(d = readdir(devdir)) {
-		if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
-			continue;
-		
-		if (fstatat(fd, d->d_name, &info, 0)) {
-			perror("fstatat");
-			continue;
-		}
-		if (info.st_rdev == id) {
-			if (strlen(d->d_name) + 1 > len) {
-				fprintf(stderr, "Device path too large for internal buffer\n");
-				exit(1);
-			}
-			strcpy(buf, d->d_name);
-			found = true;
-			break;
-		}
-	}
-	if (!found) {
-		fprintf(stderr, "Cannot find device that contains the filesystem\n");
-		exit(1);
-	}
-
-	closedir(devdir);
-}
-
 void statx_info(struct statx *info, int fd, const char *filename)
 {
 	unsigned int mask = STATX_TYPE | STATX_INO | STATX_SUBVOL;
@@ -155,7 +109,7 @@ std::unordered_set<std::string> handle_tree_dump(int fd, char *pattern, char *di
 		if (state == BACKREF) {
 			/* Found our extent */
 			if (strstr(buf, pattern)) {
-				const char *argv[] = {"btrfs", "inspect-internal", "logical-resolve", logical_addr, dirpath};
+				const char *argv[] = {"btrfs", "inspect-internal", "logical-resolve", logical_addr, dirpath, NULL};
 				struct process btrfsproc = run_program(argv);
 				FILE *filepath_stream = fdopen(btrfsproc.pipefd, "r");
 				if (!filepath_stream) {
@@ -191,6 +145,26 @@ std::unordered_set<std::string> handle_tree_dump(int fd, char *pattern, char *di
 	return result;
 }
 
+void find_device(char *dev, char *dirpath)
+{
+	const char *argv[] = {"btrfs", "device", "stats", dirpath, NULL};
+	struct process btrfsproc = run_program(argv);
+	FILE *fp = fdopen(btrfsproc.pipefd, "r");
+	if (!fp) {
+		perror("fdopen");
+		exit(1);
+	}
+	/* Read from [ until ] */
+	int ret = fscanf(fp, "[%[^]]", dev);
+	if (ret == 0 || ret == EOF) {
+		fprintf(stderr, "Cannot find device that contains the filesystem\n");
+		exit(1);
+	}
+	fclose(fp);
+	siginfo_t cmd_state;
+	waitid(P_PID, btrfsproc.pid, &cmd_state, WEXITED);
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc != 2) {
@@ -220,14 +194,14 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return ENOMEM;
 
-	char dev[25] = "/dev/";
-	size_t len = strlen(dev);
-	find_device(dev+len, sizeof(dev)-len, makedev(info.stx_dev_major, info.stx_dev_minor));
+	char dev[PATH_MAX];
+	char *dirpath = dirname(argv[1]);
+	find_device(dev, dirpath);
 
 	const char *newargv[] = {"btrfs", "inspect-internal", "dump-tree", "-t", "extent", dev, NULL};
 	struct process btrfsproc = run_program(newargv);
 	/* Takes ownership of pattern */
-	auto result = handle_tree_dump(btrfsproc.pipefd, pattern, dirname(argv[1]));
+	auto result = handle_tree_dump(btrfsproc.pipefd, pattern, dirpath);
 	siginfo_t cmd_state;
 	if (waitid(P_PID, btrfsproc.pid, &cmd_state, WEXITED)) {
 		perror("waitid");
