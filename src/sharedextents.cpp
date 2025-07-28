@@ -222,7 +222,7 @@ int main(int argc, char *argv[])
 	else {
 		printf("Extents shared among:\n");
 		for (const std::string &str : result) {
-			printf("%s\n", str.c_str());
+			printf("%s", str.c_str());
 		}
 	}
 
