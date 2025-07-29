@@ -1,5 +1,5 @@
 # sharedextents
-A program that checks what other files on the btrfs filesystem share extents with the file provided in argument, by scanning the extent tree.
+A program that checks what other files on the btrfs filesystem share extents with the file provided in argument, by scanning the extent tree. It is mostly C code, but compiles with C++ because of std::unordered_set and std::vector used in one function.
 # Usage
 `sharedextents <filename>`
 # Dependencies
